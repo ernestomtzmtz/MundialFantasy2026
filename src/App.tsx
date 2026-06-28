@@ -57,7 +57,7 @@ export default function App() {
   const lastCountdownSecond = useRef<number | undefined>(undefined);
   const lastPickSoundCount = useRef(state.picks.length);
   const lastAlertTurn = useRef("");
-  const previousCompleted = useRef(state.completed);
+  const previousCompleted = useRef(isDraftComplete(state));
 
   const currentPickNumber = state.picks.length + 1;
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
@@ -65,6 +65,7 @@ export default function App() {
   const currentParticipant = participantById(state, currentParticipantId);
   const currentTeam = selectedTeamId ? state.teams.find((team) => team.id === selectedTeamId && !team.ownerId) : undefined;
   const visibleSecondsLeft = getVisibleSecondsLeft(state, clockNow);
+  const draftComplete = isDraftComplete(state);
 
   useEffect(() => {
     let unsubscribe: undefined | (() => void);
@@ -197,13 +198,16 @@ export default function App() {
   }, [state.picks]);
 
   useEffect(() => {
-    if (state.completed && !previousCompleted.current) {
-      window.alert("Felicidades, el draft ha terminado.");
+    if (draftComplete && !state.completed) {
+      setState((draft) => ({ ...draft, completed: true, paused: true, turnStartedAt: undefined, clockOwnerId: undefined }));
+    }
+
+    if (draftComplete && !previousCompleted.current) {
       speakText("Felicidades, el draft ha terminado.");
       playDraftCompleteSound();
     }
-    previousCompleted.current = state.completed;
-  }, [state.completed]);
+    previousCompleted.current = draftComplete;
+  }, [draftComplete, state.completed]);
 
   function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual", deterministicAutomatic = false) {
     primeAudio();
@@ -246,6 +250,8 @@ export default function App() {
 
   function startDraft() {
     primeAudio();
+    speakText("Comenzamos");
+    playDraftStartSound();
     setState((draft) => ({
       ...draft,
       started: true,
@@ -356,6 +362,7 @@ export default function App() {
             importJson={importJson}
             visibleSecondsLeft={visibleSecondsLeft}
             clockAlert={clockAlert}
+            draftComplete={draftComplete}
           />
         )}
         {view === "teams" && <TeamsView state={state} />}
@@ -384,6 +391,7 @@ function DraftView(props: {
   importJson: (file?: File) => void;
   visibleSecondsLeft: number;
   clockAlert: string;
+  draftComplete: boolean;
 }) {
   const [resetConfirmStep, setResetConfirmStep] = useState(0);
   const {
@@ -403,10 +411,11 @@ function DraftView(props: {
     importJson,
     visibleSecondsLeft,
     clockAlert,
+    draftComplete,
   } = props;
-  const draftControlsLocked = state.completed;
-  const canStartDraft = !state.started && !state.completed;
-  const canTogglePause = state.started && !state.completed;
+  const draftControlsLocked = draftComplete;
+  const canStartDraft = !state.started && !draftComplete;
+  const canTogglePause = state.started && !draftComplete;
   const resetButtonLabel =
     resetConfirmStep === 0 ? "Reiniciar draft" : resetConfirmStep === 1 ? "Confirmar reinicio" : "Confirmar otra vez";
 
@@ -429,11 +438,11 @@ function DraftView(props: {
         <div className="grid gap-4 lg:grid-cols-[1fr_180px]">
           <div>
             <p className="text-sm font-bold uppercase text-ocean">
-              {state.completed ? `${state.picks.length} picks completados` : `Pick #${Math.min(currentPickNumber, state.teams.length)}`}
+              {draftComplete ? `${state.picks.length} picks completados` : `Pick #${Math.min(currentPickNumber, state.teams.length)}`}
             </p>
-            <h2 className="mt-1 text-3xl font-black">{state.completed ? "Draft terminado" : `Turno de ${currentParticipantName}`}</h2>
+            <h2 className="mt-1 text-3xl font-black">{draftComplete ? "Draft terminado" : `Turno de ${currentParticipantName}`}</h2>
             <p className="mt-2 text-sm text-slate-600">
-              {state.completed
+              {draftComplete
                 ? "Felicidades, todos los equipos ya tienen dueño."
                 : `Ronda ${currentRound} · Orden snake: Mau → Adrián → Ernesto → Ernesto → Adrián → Mau`}
             </p>
@@ -549,7 +558,7 @@ function DraftView(props: {
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <button
             onClick={() => currentTeam && makePick(currentTeam.id, "manual")}
-            disabled={!currentTeam || !state.started || state.paused || state.completed}
+            disabled={!currentTeam || !state.started || state.paused || draftComplete}
             className="rounded-md bg-trophy px-5 py-3 font-black text-ink disabled:opacity-45"
           >
             Confirmar pick manual
@@ -965,6 +974,10 @@ function participantById(state: DraftState, id: ParticipantId) {
   return state.participants.find((participant) => participant.id === id) ?? PARTICIPANTS.find((participant) => participant.id === id) ?? PARTICIPANTS[0];
 }
 
+function isDraftComplete(state: DraftState) {
+  return state.completed || state.picks.length >= state.teams.length || state.teams.every((team) => Boolean(team.ownerId));
+}
+
 function getDeterministicAutomaticTeam(openTeams: Team[], state: DraftState) {
   const seed = `${state.picks.length}:${state.turnStartedAt ?? ""}:${state.draftDuration}`;
   let hash = 0;
@@ -1069,6 +1082,12 @@ function playDraftCompleteSound() {
   playTone(523, 0.14, 0, "triangle", 0.07);
   playTone(659, 0.14, 0.15, "triangle", 0.07);
   playTone(784, 0.2, 0.3, "triangle", 0.08);
+}
+
+function playDraftStartSound() {
+  playTone(392, 0.12, 0, "triangle", 0.07);
+  playTone(523, 0.12, 0.13, "triangle", 0.07);
+  playTone(659, 0.18, 0.26, "triangle", 0.08);
 }
 
 function speakText(text: string) {
