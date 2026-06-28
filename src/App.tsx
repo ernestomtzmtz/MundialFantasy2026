@@ -139,10 +139,10 @@ export default function App() {
 
   useEffect(() => {
     if (!state.started || state.paused || state.completed) return;
-    if (state.clockOwnerId !== clientId.current) return;
     if (visibleSecondsLeft > 0) return;
-    makePick(selectedTeamId || undefined, selectedTeamId ? "manual" : "automatic");
-  }, [selectedTeamId, state.started, state.paused, state.completed, state.clockOwnerId, visibleSecondsLeft]);
+    if (!selectedTeamId && state.clockOwnerId !== clientId.current && !isPastAutomaticGrace(state, clockNow)) return;
+    makePick(selectedTeamId || undefined, selectedTeamId ? "manual" : "automatic", true);
+  }, [clockNow, selectedTeamId, state, visibleSecondsLeft]);
 
   useEffect(() => {
     const turnKey = `${state.picks.length}:${state.turnStartedAt ?? "paused"}`;
@@ -195,14 +195,18 @@ export default function App() {
     lastPickSoundCount.current = state.picks.length;
   }, [state.picks]);
 
-  function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual") {
+  function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual", deterministicAutomatic = false) {
     primeAudio();
     setState((draft) => {
       if (!draft.started || draft.completed) return draft;
       const openTeams = draft.teams.filter((team) => !team.ownerId);
       if (openTeams.length === 0) return { ...draft, completed: true, paused: true };
       const requested = teamId ? openTeams.find((team) => team.id === teamId) : undefined;
-      const team = requested ?? openTeams[Math.floor(Math.random() * openTeams.length)];
+      const team =
+        requested ??
+        (deterministicAutomatic
+          ? getDeterministicAutomaticTeam(openTeams, draft)
+          : openTeams[Math.floor(Math.random() * openTeams.length)]);
       const participantId = getParticipantForPick(draft.picks.length);
       const pick: DraftPick = {
         pickNumber: draft.picks.length + 1,
@@ -945,6 +949,15 @@ function participantById(state: DraftState, id: ParticipantId) {
   return state.participants.find((participant) => participant.id === id) ?? PARTICIPANTS.find((participant) => participant.id === id) ?? PARTICIPANTS[0];
 }
 
+function getDeterministicAutomaticTeam(openTeams: Team[], state: DraftState) {
+  const seed = `${state.picks.length}:${state.turnStartedAt ?? ""}:${state.draftDuration}`;
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return openTeams[hash % openTeams.length];
+}
+
 function getClientId() {
   const existing = localStorage.getItem(CLIENT_ID_KEY);
   if (existing) return existing;
@@ -965,6 +978,13 @@ function getVisibleSecondsLeft(state: DraftState, now = Date.now()) {
 
   const elapsedSeconds = Math.floor((now - startedAt) / 1000);
   return Math.max(0, state.draftDuration - elapsedSeconds);
+}
+
+function isPastAutomaticGrace(state: DraftState, now = Date.now()) {
+  if (!state.turnStartedAt) return false;
+  const startedAt = Date.parse(state.turnStartedAt);
+  if (Number.isNaN(startedAt)) return false;
+  return now - startedAt >= state.draftDuration * 1000 + 1500;
 }
 
 type AudioWindow = Window & {
