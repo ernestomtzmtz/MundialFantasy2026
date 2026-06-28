@@ -58,6 +58,7 @@ export default function App() {
   const lastPickSoundCount = useRef(state.picks.length);
   const lastAlertTurn = useRef("");
   const previousCompleted = useRef(isDraftComplete(state));
+  const previousStarted = useRef(state.started);
 
   const currentPickNumber = state.picks.length + 1;
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
@@ -130,6 +131,30 @@ export default function App() {
         });
     }, 250);
   }, [state]);
+
+  useEffect(() => {
+    function unlockAudio() {
+      primeAudio();
+      document.removeEventListener("pointerdown", unlockAudio);
+      document.removeEventListener("keydown", unlockAudio);
+    }
+
+    document.addEventListener("pointerdown", unlockAudio);
+    document.addEventListener("keydown", unlockAudio);
+
+    return () => {
+      document.removeEventListener("pointerdown", unlockAudio);
+      document.removeEventListener("keydown", unlockAudio);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (state.started && !previousStarted.current && !draftComplete) {
+      speakText("Comenzamos");
+      playDraftStartSound();
+    }
+    previousStarted.current = state.started;
+  }, [draftComplete, state.started]);
 
   useEffect(() => {
     if (!state.started || state.paused || state.completed) return;
@@ -250,8 +275,6 @@ export default function App() {
 
   function startDraft() {
     primeAudio();
-    speakText("Comenzamos");
-    playDraftStartSound();
     setState((draft) => ({
       ...draft,
       started: true,
