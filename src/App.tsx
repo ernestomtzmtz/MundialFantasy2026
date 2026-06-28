@@ -37,6 +37,7 @@ const matchStatusLabels: Record<MatchStatus, string> = {
   finished: "Finalizado",
 };
 const CLIENT_ID_KEY = "world-cup-fantasy-draft:client-id";
+const TWENTY_SECONDS_ALERT = "Twenty seconds left";
 
 type View = "draft" | "teams" | "bracket" | "scores" | "ranking";
 
@@ -46,11 +47,16 @@ export default function App() {
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [syncStatus, setSyncStatus] = useState("Conectando...");
   const [clockNow, setClockNow] = useState(Date.now());
+  const [clockAlert, setClockAlert] = useState("");
   const clientId = useRef(getClientId());
   const applyingRemoteState = useRef(false);
   const remoteReady = useRef(false);
   const lastRemoteJson = useRef("");
   const saveTimeout = useRef<number | undefined>(undefined);
+  const lastTwentySecondTurn = useRef("");
+  const lastCountdownSecond = useRef<number | undefined>(undefined);
+  const lastPickSoundCount = useRef(state.picks.length);
+  const lastAlertTurn = useRef("");
 
   const currentPickNumber = state.picks.length + 1;
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
@@ -138,7 +144,59 @@ export default function App() {
     makePick(selectedTeamId || undefined, selectedTeamId ? "manual" : "automatic");
   }, [selectedTeamId, state.started, state.paused, state.completed, state.clockOwnerId, visibleSecondsLeft]);
 
+  useEffect(() => {
+    const turnKey = `${state.picks.length}:${state.turnStartedAt ?? "paused"}`;
+    if (!state.started || state.paused || state.completed || !state.turnStartedAt) {
+      setClockAlert("");
+      lastCountdownSecond.current = undefined;
+      lastAlertTurn.current = turnKey;
+      return;
+    }
+
+    if (lastAlertTurn.current !== turnKey) {
+      lastAlertTurn.current = turnKey;
+      lastCountdownSecond.current = undefined;
+      setClockAlert("");
+      return;
+    }
+
+    if (visibleSecondsLeft === 20 && lastTwentySecondTurn.current !== turnKey) {
+      lastTwentySecondTurn.current = turnKey;
+      setClockAlert(TWENTY_SECONDS_ALERT);
+      speakText(TWENTY_SECONDS_ALERT);
+      playTwentySecondSound();
+    } else if (visibleSecondsLeft < 20 && visibleSecondsLeft > 10 && clockAlert) {
+      setClockAlert("");
+    }
+
+    if (visibleSecondsLeft <= 10 && visibleSecondsLeft > 0 && lastCountdownSecond.current !== visibleSecondsLeft) {
+      lastCountdownSecond.current = visibleSecondsLeft;
+      setClockAlert(`Cuenta regresiva: ${visibleSecondsLeft}`);
+      playCountdownSound(visibleSecondsLeft);
+    }
+
+    if (visibleSecondsLeft > 10) {
+      lastCountdownSecond.current = undefined;
+    }
+  }, [clockAlert, state.started, state.paused, state.completed, state.picks.length, state.turnStartedAt, visibleSecondsLeft]);
+
+  useEffect(() => {
+    if (state.picks.length <= lastPickSoundCount.current) {
+      lastPickSoundCount.current = state.picks.length;
+      return;
+    }
+
+    const latestPick = state.picks[state.picks.length - 1];
+    if (latestPick?.pickType === "automatic") {
+      playRandomPickSound();
+    } else {
+      playPickConfirmedSound();
+    }
+    lastPickSoundCount.current = state.picks.length;
+  }, [state.picks]);
+
   function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual") {
+    primeAudio();
     setState((draft) => {
       if (!draft.started || draft.completed) return draft;
       const openTeams = draft.teams.filter((team) => !team.ownerId);
@@ -173,6 +231,7 @@ export default function App() {
   }
 
   function startDraft() {
+    primeAudio();
     setState((draft) => ({
       ...draft,
       started: true,
@@ -185,6 +244,7 @@ export default function App() {
   }
 
   function togglePauseDraft() {
+    primeAudio();
     setState((draft) => {
       if (!draft.started || draft.completed) return draft;
       if (draft.paused) {
@@ -281,6 +341,7 @@ export default function App() {
             setState={setState}
             importJson={importJson}
             visibleSecondsLeft={visibleSecondsLeft}
+            clockAlert={clockAlert}
           />
         )}
         {view === "teams" && <TeamsView state={state} />}
@@ -308,6 +369,7 @@ function DraftView(props: {
   setState: React.Dispatch<React.SetStateAction<DraftState>>;
   importJson: (file?: File) => void;
   visibleSecondsLeft: number;
+  clockAlert: string;
 }) {
   const [resetConfirmStep, setResetConfirmStep] = useState(0);
   const {
@@ -326,6 +388,7 @@ function DraftView(props: {
     setState,
     importJson,
     visibleSecondsLeft,
+    clockAlert,
   } = props;
   const draftControlsLocked = state.completed;
   const canStartDraft = !state.started && !state.completed;
@@ -360,13 +423,16 @@ function DraftView(props: {
             <p className={`text-5xl font-black ${visibleSecondsLeft <= 3 ? "text-coral" : "text-trophy"}`}>
               {visibleSecondsLeft}
             </p>
+            <p className={`mt-2 min-h-5 text-xs font-black uppercase ${visibleSecondsLeft <= 10 ? "text-coral" : "text-trophy"}`}>
+              {clockAlert}
+            </p>
           </div>
         </div>
 
         <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-3">
           <p className="text-xs font-black uppercase text-slate-500">Tiempo por pick</p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {([10, 30, 60] as const).map((duration) => (
+            {([30, 60, 120] as const).map((duration) => (
               <button
                 key={duration}
                 onClick={() => setState((draft) => ({ ...draft, draftDuration: duration, secondsLeft: duration }))}
@@ -899,6 +965,78 @@ function getVisibleSecondsLeft(state: DraftState, now = Date.now()) {
 
   const elapsedSeconds = Math.floor((now - startedAt) / 1000);
   return Math.max(0, state.draftDuration - elapsedSeconds);
+}
+
+type AudioWindow = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+let audioContext: AudioContext | undefined;
+
+function getAudioContext() {
+  if (audioContext) return audioContext;
+  const AudioContextConstructor = window.AudioContext ?? (window as AudioWindow).webkitAudioContext;
+  if (!AudioContextConstructor) return undefined;
+  audioContext = new AudioContextConstructor();
+  return audioContext;
+}
+
+function primeAudio() {
+  const context = getAudioContext();
+  if (context?.state === "suspended") {
+    void context.resume();
+  }
+}
+
+function playTone(frequency: number, duration = 0.16, delay = 0, type: OscillatorType = "sine", volume = 0.08) {
+  const context = getAudioContext();
+  if (!context) return;
+  void context.resume();
+
+  const start = context.currentTime + delay;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, start);
+  gain.gain.setValueAtTime(0.0001, start);
+  gain.gain.exponentialRampToValueAtTime(volume, start + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(start);
+  oscillator.stop(start + duration + 0.02);
+}
+
+function playTwentySecondSound() {
+  playTone(660, 0.14, 0, "triangle", 0.07);
+  playTone(880, 0.18, 0.16, "triangle", 0.07);
+}
+
+function playCountdownSound(second: number) {
+  playTone(second <= 3 ? 1040 : 760, second <= 3 ? 0.18 : 0.09, 0, "square", second <= 3 ? 0.06 : 0.04);
+}
+
+function playRandomPickSound() {
+  playTone(220, 0.14, 0, "sawtooth", 0.07);
+  playTone(392, 0.14, 0.14, "sawtooth", 0.07);
+  playTone(740, 0.2, 0.29, "triangle", 0.08);
+}
+
+function playPickConfirmedSound() {
+  playTone(520, 0.11, 0, "triangle", 0.06);
+  playTone(780, 0.16, 0.12, "triangle", 0.06);
+}
+
+function speakText(text: string) {
+  if (!("speechSynthesis" in window)) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = "en-US";
+  utterance.rate = 1;
+  utterance.volume = 0.8;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
 }
 
 function eligibleMoneyMatch(state: DraftState, match: Match) {

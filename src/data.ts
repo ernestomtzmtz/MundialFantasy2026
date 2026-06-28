@@ -99,8 +99,8 @@ export function createInitialState(): DraftState {
     started: false,
     paused: true,
     completed: false,
-    secondsLeft: 10,
-    draftDuration: 10,
+    secondsLeft: 30,
+    draftDuration: 30,
     turnStartedAt: undefined,
     clockOwnerId: undefined,
   };

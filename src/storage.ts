@@ -23,7 +23,10 @@ export function normalizeState(value: unknown): DraftState {
   if (!value || typeof value !== "object") return initial;
 
   const candidate = value as Partial<DraftState>;
-  const draftDuration = candidate.draftDuration === 30 || candidate.draftDuration === 60 ? candidate.draftDuration : 10;
+  const draftDuration =
+    candidate.draftDuration === 30 || candidate.draftDuration === 60 || candidate.draftDuration === 120
+      ? candidate.draftDuration
+      : 30;
   const savedTeams = Array.isArray(candidate.teams) ? candidate.teams : [];
   const savedMatches = Array.isArray(candidate.matches) ? candidate.matches : [];
   const savedParticipants = Array.isArray(candidate.participants) ? candidate.participants : [];
