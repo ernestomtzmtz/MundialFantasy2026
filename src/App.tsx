@@ -57,6 +57,7 @@ export default function App() {
   const lastCountdownSecond = useRef<number | undefined>(undefined);
   const lastPickSoundCount = useRef(state.picks.length);
   const lastAlertTurn = useRef("");
+  const previousCompleted = useRef(state.completed);
 
   const currentPickNumber = state.picks.length + 1;
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
@@ -194,6 +195,15 @@ export default function App() {
     }
     lastPickSoundCount.current = state.picks.length;
   }, [state.picks]);
+
+  useEffect(() => {
+    if (state.completed && !previousCompleted.current) {
+      window.alert("Felicidades, el draft ha terminado.");
+      speakText("Felicidades, el draft ha terminado.");
+      playDraftCompleteSound();
+    }
+    previousCompleted.current = state.completed;
+  }, [state.completed]);
 
   function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual", deterministicAutomatic = false) {
     primeAudio();
@@ -418,9 +428,15 @@ function DraftView(props: {
       <div className="rounded-lg border border-white/10 bg-white/95 p-4 text-ink shadow-glow md:p-6">
         <div className="grid gap-4 lg:grid-cols-[1fr_180px]">
           <div>
-            <p className="text-sm font-bold uppercase text-ocean">Pick #{Math.min(currentPickNumber, state.teams.length)}</p>
-            <h2 className="mt-1 text-3xl font-black">Turno de {currentParticipantName}</h2>
-            <p className="mt-2 text-sm text-slate-600">Ronda {currentRound} · Orden snake: Mau → Adrián → Ernesto → Ernesto → Adrián → Mau</p>
+            <p className="text-sm font-bold uppercase text-ocean">
+              {state.completed ? `${state.picks.length} picks completados` : `Pick #${Math.min(currentPickNumber, state.teams.length)}`}
+            </p>
+            <h2 className="mt-1 text-3xl font-black">{state.completed ? "Draft terminado" : `Turno de ${currentParticipantName}`}</h2>
+            <p className="mt-2 text-sm text-slate-600">
+              {state.completed
+                ? "Felicidades, todos los equipos ya tienen dueño."
+                : `Ronda ${currentRound} · Orden snake: Mau → Adrián → Ernesto → Ernesto → Adrián → Mau`}
+            </p>
           </div>
           <div className="rounded-lg bg-ink p-4 text-center text-white">
             <p className="text-xs font-bold uppercase text-white/50">Reloj</p>
@@ -1047,6 +1063,12 @@ function playRandomPickSound() {
 function playPickConfirmedSound() {
   playTone(520, 0.11, 0, "triangle", 0.06);
   playTone(780, 0.16, 0.12, "triangle", 0.06);
+}
+
+function playDraftCompleteSound() {
+  playTone(523, 0.14, 0, "triangle", 0.07);
+  playTone(659, 0.14, 0.15, "triangle", 0.07);
+  playTone(784, 0.2, 0.3, "triangle", 0.08);
 }
 
 function speakText(text: string) {
