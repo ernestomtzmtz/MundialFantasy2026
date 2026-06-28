@@ -66,4 +66,6 @@ export interface DraftState {
   completed: boolean;
   secondsLeft: number;
   draftDuration: 10 | 30 | 60;
+  turnStartedAt?: string;
+  clockOwnerId?: string;
 }

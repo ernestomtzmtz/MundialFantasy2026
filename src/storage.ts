@@ -78,6 +78,8 @@ export function normalizeState(value: unknown): DraftState {
     completed: Boolean(candidate.completed),
     secondsLeft: typeof candidate.secondsLeft === "number" ? Math.min(draftDuration, Math.max(0, candidate.secondsLeft)) : draftDuration,
     draftDuration,
+    turnStartedAt: typeof candidate.turnStartedAt === "string" ? candidate.turnStartedAt : undefined,
+    clockOwnerId: typeof candidate.clockOwnerId === "string" ? candidate.clockOwnerId : undefined,
   });
 }
 

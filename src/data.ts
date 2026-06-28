@@ -101,5 +101,7 @@ export function createInitialState(): DraftState {
     completed: false,
     secondsLeft: 10,
     draftDuration: 10,
+    turnStartedAt: undefined,
+    clockOwnerId: undefined,
   };
 }

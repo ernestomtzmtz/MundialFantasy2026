@@ -36,6 +36,7 @@ const matchStatusLabels: Record<MatchStatus, string> = {
   live: "En vivo",
   finished: "Finalizado",
 };
+const CLIENT_ID_KEY = "world-cup-fantasy-draft:client-id";
 
 type View = "draft" | "teams" | "bracket" | "scores" | "ranking";
 
@@ -44,6 +45,8 @@ export default function App() {
   const [view, setView] = useState<View>("draft");
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [syncStatus, setSyncStatus] = useState("Conectando...");
+  const [clockNow, setClockNow] = useState(Date.now());
+  const clientId = useRef(getClientId());
   const applyingRemoteState = useRef(false);
   const remoteReady = useRef(false);
   const lastRemoteJson = useRef("");
@@ -53,7 +56,8 @@ export default function App() {
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
   const currentParticipantId = getParticipantForPick(state.picks.length);
   const currentParticipant = participantById(state, currentParticipantId);
-  const currentTeam = selectedTeamId ? state.teams.find((team) => team.id === selectedTeamId) : undefined;
+  const currentTeam = selectedTeamId ? state.teams.find((team) => team.id === selectedTeamId && !team.ownerId) : undefined;
+  const visibleSecondsLeft = getVisibleSecondsLeft(state, clockNow);
 
   useEffect(() => {
     let unsubscribe: undefined | (() => void);
@@ -121,15 +125,18 @@ export default function App() {
 
   useEffect(() => {
     if (!state.started || state.paused || state.completed) return;
-    if (state.secondsLeft <= 0) {
-      makePick(selectedTeamId || undefined, selectedTeamId ? "manual" : "automatic");
-      return;
-    }
     const interval = window.setInterval(() => {
-      setState((draft) => ({ ...draft, secondsLeft: Math.max(0, draft.secondsLeft - 1) }));
-    }, 1000);
+      setClockNow(Date.now());
+    }, 250);
     return () => window.clearInterval(interval);
-  }, [selectedTeamId, state.started, state.paused, state.completed, state.secondsLeft]);
+  }, [state.started, state.paused, state.completed, state.turnStartedAt]);
+
+  useEffect(() => {
+    if (!state.started || state.paused || state.completed) return;
+    if (state.clockOwnerId !== clientId.current) return;
+    if (visibleSecondsLeft > 0) return;
+    makePick(selectedTeamId || undefined, selectedTeamId ? "manual" : "automatic");
+  }, [selectedTeamId, state.started, state.paused, state.completed, state.clockOwnerId, visibleSecondsLeft]);
 
   function makePick(teamId?: string, pickType: "manual" | "automatic" = "manual") {
     setState((draft) => {
@@ -151,7 +158,16 @@ export default function App() {
         item.id === team.id ? { ...item, ownerId: participantId, status: "alive" as const } : item,
       );
       const completed = draft.picks.length + 1 >= draft.teams.length;
-      return { ...draft, teams, picks: [...draft.picks, pick], completed, paused: completed, secondsLeft: draft.draftDuration };
+      return {
+        ...draft,
+        teams,
+        picks: [...draft.picks, pick],
+        completed,
+        paused: completed,
+        secondsLeft: draft.draftDuration,
+        turnStartedAt: completed ? undefined : new Date().toISOString(),
+        clockOwnerId: completed ? undefined : clientId.current,
+      };
     });
     setSelectedTeamId("");
   }
@@ -163,7 +179,33 @@ export default function App() {
       paused: false,
       completed: draft.picks.length >= draft.teams.length,
       secondsLeft: draft.secondsLeft > 0 ? draft.secondsLeft : draft.draftDuration,
+      turnStartedAt: new Date(Date.now() - (draft.draftDuration - (draft.secondsLeft > 0 ? draft.secondsLeft : draft.draftDuration)) * 1000).toISOString(),
+      clockOwnerId: clientId.current,
     }));
+  }
+
+  function togglePauseDraft() {
+    setState((draft) => {
+      if (!draft.started || draft.completed) return draft;
+      if (draft.paused) {
+        const remaining = draft.secondsLeft > 0 ? draft.secondsLeft : draft.draftDuration;
+        return {
+          ...draft,
+          paused: false,
+          secondsLeft: remaining,
+          turnStartedAt: new Date(Date.now() - (draft.draftDuration - remaining) * 1000).toISOString(),
+          clockOwnerId: clientId.current,
+        };
+      }
+
+      return {
+        ...draft,
+        paused: true,
+        secondsLeft: getVisibleSecondsLeft(draft),
+        turnStartedAt: undefined,
+        clockOwnerId: undefined,
+      };
+    });
   }
 
   function resetDraft() {
@@ -234,9 +276,11 @@ export default function App() {
             currentTeam={currentTeam}
             makePick={makePick}
             startDraft={startDraft}
+            togglePauseDraft={togglePauseDraft}
             resetDraft={resetDraft}
             setState={setState}
             importJson={importJson}
+            visibleSecondsLeft={visibleSecondsLeft}
           />
         )}
         {view === "teams" && <TeamsView state={state} />}
@@ -259,9 +303,11 @@ function DraftView(props: {
   currentTeam?: Team;
   makePick: (teamId?: string, pickType?: "manual" | "automatic") => void;
   startDraft: () => void;
+  togglePauseDraft: () => void;
   resetDraft: () => void;
   setState: React.Dispatch<React.SetStateAction<DraftState>>;
   importJson: (file?: File) => void;
+  visibleSecondsLeft: number;
 }) {
   const [resetConfirmStep, setResetConfirmStep] = useState(0);
   const {
@@ -275,9 +321,11 @@ function DraftView(props: {
     currentTeam,
     makePick,
     startDraft,
+    togglePauseDraft,
     resetDraft,
     setState,
     importJson,
+    visibleSecondsLeft,
   } = props;
   const draftControlsLocked = state.completed;
   const canStartDraft = !state.started && !state.completed;
@@ -309,8 +357,8 @@ function DraftView(props: {
           </div>
           <div className="rounded-lg bg-ink p-4 text-center text-white">
             <p className="text-xs font-bold uppercase text-white/50">Reloj</p>
-            <p className={`text-5xl font-black ${state.secondsLeft <= 3 ? "text-coral" : "text-trophy"}`}>
-              {state.secondsLeft}
+            <p className={`text-5xl font-black ${visibleSecondsLeft <= 3 ? "text-coral" : "text-trophy"}`}>
+              {visibleSecondsLeft}
             </p>
           </div>
         </div>
@@ -342,7 +390,7 @@ function DraftView(props: {
             <Play size={18} /> Iniciar draft
           </button>
           <button
-            onClick={() => setState((draft) => ({ ...draft, paused: !draft.paused }))}
+            onClick={togglePauseDraft}
             disabled={!canTogglePause}
             className="inline-flex items-center gap-2 rounded-md bg-ocean px-4 py-2 font-black text-white disabled:cursor-not-allowed disabled:opacity-45"
           >
@@ -829,6 +877,28 @@ function getParticipantForPick(pickIndex: number): ParticipantId {
 
 function participantById(state: DraftState, id: ParticipantId) {
   return state.participants.find((participant) => participant.id === id) ?? PARTICIPANTS.find((participant) => participant.id === id) ?? PARTICIPANTS[0];
+}
+
+function getClientId() {
+  const existing = localStorage.getItem(CLIENT_ID_KEY);
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  localStorage.setItem(CLIENT_ID_KEY, id);
+  return id;
+}
+
+function getVisibleSecondsLeft(state: DraftState, now = Date.now()) {
+  if (!state.started || state.paused || state.completed || !state.turnStartedAt) {
+    return Math.min(state.draftDuration, Math.max(0, state.secondsLeft));
+  }
+
+  const startedAt = Date.parse(state.turnStartedAt);
+  if (Number.isNaN(startedAt)) {
+    return Math.min(state.draftDuration, Math.max(0, state.secondsLeft));
+  }
+
+  const elapsedSeconds = Math.floor((now - startedAt) / 1000);
+  return Math.max(0, state.draftDuration - elapsedSeconds);
 }
 
 function eligibleMoneyMatch(state: DraftState, match: Match) {
