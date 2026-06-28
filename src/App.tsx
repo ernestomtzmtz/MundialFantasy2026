@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   Download,
@@ -11,6 +11,7 @@ import {
   Upload,
 } from "lucide-react";
 import { createInitialState, PARTICIPANTS } from "./data";
+import { ensureRemoteDraftState, saveRemoteDraftState, subscribeToRemoteDraftState } from "./firebaseService";
 import { changeMatchStatus, simulateMatch, updateMatch } from "./matchService";
 import { exportState, loadState, normalizeState, saveState } from "./storage";
 import type { DraftPick, DraftState, Match, MatchStatus, ParticipantId, RoundName, Team } from "./types";
@@ -42,6 +43,11 @@ export default function App() {
   const [state, setState] = useState<DraftState>(() => loadState());
   const [view, setView] = useState<View>("draft");
   const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [syncStatus, setSyncStatus] = useState("Conectando...");
+  const applyingRemoteState = useRef(false);
+  const remoteReady = useRef(false);
+  const lastRemoteJson = useRef("");
+  const saveTimeout = useRef<number | undefined>(undefined);
 
   const currentPickNumber = state.picks.length + 1;
   const currentRound = Math.floor(state.picks.length / DRAFT_ORDER.length) + 1;
@@ -49,7 +55,69 @@ export default function App() {
   const currentParticipant = participantById(state, currentParticipantId);
   const currentTeam = selectedTeamId ? state.teams.find((team) => team.id === selectedTeamId) : undefined;
 
-  useEffect(() => saveState(state), [state]);
+  useEffect(() => {
+    let unsubscribe: undefined | (() => void);
+    let active = true;
+
+    ensureRemoteDraftState(state)
+      .then((remoteState) => {
+        if (!active) return;
+        applyingRemoteState.current = true;
+        lastRemoteJson.current = JSON.stringify(remoteState);
+        setState(remoteState);
+        remoteReady.current = true;
+        setSyncStatus("Sincronizado");
+        unsubscribe = subscribeToRemoteDraftState(
+          (remoteStateUpdate) => {
+            const nextJson = JSON.stringify(remoteStateUpdate);
+            if (nextJson === lastRemoteJson.current) return;
+            applyingRemoteState.current = true;
+            lastRemoteJson.current = nextJson;
+            setState(remoteStateUpdate);
+            setSyncStatus("Sincronizado");
+          },
+          (error) => {
+            console.error(error);
+            setSyncStatus("Error de sincronización");
+          },
+        );
+      })
+      .catch((error) => {
+        console.error(error);
+        remoteReady.current = false;
+        setSyncStatus("Firebase no conectado");
+      });
+
+    return () => {
+      active = false;
+      unsubscribe?.();
+      if (saveTimeout.current) window.clearTimeout(saveTimeout.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    saveState(state);
+
+    if (applyingRemoteState.current) {
+      applyingRemoteState.current = false;
+      return;
+    }
+    if (!remoteReady.current) return;
+
+    if (saveTimeout.current) window.clearTimeout(saveTimeout.current);
+    setSyncStatus("Guardando...");
+    saveTimeout.current = window.setTimeout(() => {
+      saveRemoteDraftState(state)
+        .then(() => {
+          lastRemoteJson.current = JSON.stringify(state);
+          setSyncStatus("Sincronizado");
+        })
+        .catch((error) => {
+          console.error(error);
+          setSyncStatus("Error al guardar");
+        });
+    }, 250);
+  }, [state]);
 
   useEffect(() => {
     if (!state.started || state.paused || state.completed) return;
@@ -123,6 +191,7 @@ export default function App() {
           <div>
             <p className="text-sm font-semibold uppercase tracking-[0.2em] text-turf">Mundial 2026</p>
             <h1 className="mt-1 text-3xl font-black text-white md:text-5xl">World Cup Fantasy Draft</h1>
+            <p className="mt-2 text-sm font-bold text-white/65">Firebase: {syncStatus}</p>
           </div>
           <div className="grid grid-cols-3 gap-3 sm:flex">
             {state.participants.map((participant) => (
