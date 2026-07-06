@@ -69,7 +69,6 @@ function applyAdvancement(state: DraftState): DraftState {
   }) as Team);
 
   const finishedMatches = matches.filter((match) => match.status === "finished" && match.winnerTeamId);
-  const winnerIds = new Set(finishedMatches.map((match) => match.winnerTeamId!));
   const loserIds = new Set<string>();
 
   finishedMatches.forEach((match) => {
@@ -100,9 +99,17 @@ function applyAdvancement(state: DraftState): DraftState {
     }
   });
 
+  const teamsWithUpcomingMatch = new Set<string>();
+  matches
+    .filter((match) => match.status !== "finished")
+    .forEach((match) => {
+      if (match.teamAId) teamsWithUpcomingMatch.add(match.teamAId);
+      if (match.teamBId) teamsWithUpcomingMatch.add(match.teamBId);
+    });
+
   teams = teams.map((team) => {
     if (team.status === "champion") return team;
-    if (loserIds.has(team.id) && !winnerIds.has(team.id)) return { ...team, status: "eliminated" };
+    if (loserIds.has(team.id) && !teamsWithUpcomingMatch.has(team.id)) return { ...team, status: "eliminated" };
     if (team.ownerId) return { ...team, status: "alive" };
     return team;
   });
