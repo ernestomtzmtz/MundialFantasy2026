@@ -1144,12 +1144,18 @@ function calculateChampionProbabilities(state: DraftState) {
   }
 
   function entryDistribution(match: Match, slot: "A" | "B"): Record<string, number> {
+    const sourceMatches = state.matches.filter((source) => source.nextMatchId === match.id && source.nextSlot === slot);
+    if (sourceMatches.length > 0) {
+      return sourceMatches.reduce(
+        (distribution, source) => mergeDistribution(distribution, winnerDistribution(source.id)),
+        {} as Record<string, number>,
+      );
+    }
+
     const teamId = slot === "A" ? match.teamAId : match.teamBId;
     if (teamId) return { [teamId]: 1 };
 
-    return state.matches
-      .filter((source) => source.nextMatchId === match.id && source.nextSlot === slot)
-      .reduce((distribution, source) => mergeDistribution(distribution, winnerDistribution(source.id)), {} as Record<string, number>);
+    return {};
   }
 
   function winnerDistribution(matchId: string): Record<string, number> {
