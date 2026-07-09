@@ -77,10 +77,13 @@ function applyAdvancement(state: DraftState): DraftState {
     highestRound: 0,
   }) as Team);
 
-  const finishedMatches = matches.filter((match) => match.status === "finished" && match.winnerTeamId);
   const loserIds = new Set<string>();
 
-  finishedMatches.forEach((match) => {
+  matches.forEach((item) => {
+    const match = matches.find((current) => current.id === item.id);
+    if (!match || match.status !== "finished" || !match.winnerTeamId) return;
+    if (match.teamAId !== match.winnerTeamId && match.teamBId !== match.winnerTeamId) return;
+
     const loser = match.teamAId === match.winnerTeamId ? match.teamBId : match.teamAId;
     if (loser) loserIds.add(loser);
     const level = roundLevel[match.round] ?? 0;
