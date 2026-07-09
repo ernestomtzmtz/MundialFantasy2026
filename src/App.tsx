@@ -7,6 +7,7 @@ import {
   Play,
   RefreshCcw,
   Shuffle,
+  TrendingUp,
   Trophy,
   Upload,
 } from "lucide-react";
@@ -38,8 +39,59 @@ const matchStatusLabels: Record<MatchStatus, string> = {
 };
 const CLIENT_ID_KEY = "world-cup-fantasy-draft:client-id";
 const TWENTY_SECONDS_ALERT = "Twenty seconds left";
+const TEAM_STRENGTH: Record<string, number> = {
+  argentina: 2110,
+  france: 2105,
+  spain: 2055,
+  brazil: 2025,
+  england: 2000,
+  germany: 1985,
+  portugal: 1950,
+  netherlands: 1925,
+  belgium: 1915,
+  colombia: 1890,
+  switzerland: 1870,
+  usa: 1840,
+  morocco: 1835,
+  mexico: 1825,
+  japan: 1820,
+  croatia: 1815,
+  norway: 1810,
+  senegal: 1790,
+  austria: 1785,
+  australia: 1730,
+  "ivory-coast": 1725,
+  paraguay: 1715,
+  canada: 1705,
+  ecuador: 1700,
+  sweden: 1695,
+  ghana: 1680,
+  algeria: 1670,
+  egypt: 1665,
+  "south-africa": 1625,
+  "dr-congo": 1605,
+  bosnia: 1595,
+  "cape-verde": 1585,
+};
+const HOST_BONUS: Record<string, number> = {
+  usa: 22,
+  mexico: 22,
+  canada: 22,
+};
+const HEAD_TO_HEAD_BONUS: Record<string, number> = {
+  "france|morocco": 32,
+  "spain|belgium": 18,
+  "england|norway": 20,
+  "argentina|switzerland": 26,
+  "morocco|canada": 38,
+  "france|paraguay": 34,
+  "norway|brazil": -28,
+  "belgium|usa": 16,
+  "spain|portugal": 8,
+  "switzerland|colombia": -6,
+};
 
-type View = "draft" | "teams" | "bracket" | "scores" | "ranking";
+type View = "draft" | "teams" | "bracket" | "scores" | "ranking" | "probabilities";
 
 export default function App() {
   const [state, setState] = useState<DraftState>(() => loadState());
@@ -354,6 +406,7 @@ export default function App() {
             ["bracket", "Llaves"],
             ["scores", "Marcadores"],
             ["ranking", "Ranking"],
+            ["probabilities", "Probabilidades"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -392,6 +445,7 @@ export default function App() {
         {view === "bracket" && <BracketView state={state} setState={setState} />}
         {view === "scores" && <ScoresView state={state} setState={setState} />}
         {view === "ranking" && <RankingView state={state} />}
+        {view === "probabilities" && <ProbabilitiesView state={state} />}
       </main>
     </div>
   );
@@ -750,6 +804,86 @@ function RankingView({ state }: { state: DraftState }) {
   );
 }
 
+function ProbabilitiesView({ state }: { state: DraftState }) {
+  const model = useMemo(() => calculateChampionProbabilities(state), [state]);
+  const leader = model.participantRows[0];
+
+  return (
+    <section className="space-y-5">
+      <div className="rounded-lg border border-white/10 bg-white/95 p-4 text-ink md:p-6">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-black uppercase text-ocean">Probabilidad de victoria</p>
+            <h2 className="mt-1 text-3xl font-black">Quién tiene más opciones de campeón</h2>
+          </div>
+          <div className="inline-flex items-center gap-2 rounded-md bg-ink px-4 py-2 font-black text-white">
+            <TrendingUp size={18} /> {leader ? `${leader.participant.name}: ${formatPercent(leader.probability)}` : "Sin datos"}
+          </div>
+        </div>
+
+        <div className="mt-6 space-y-4">
+          {model.participantRows.map((row) => (
+            <div key={row.participant.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full font-black text-ink"
+                    style={{ background: row.participant.color }}
+                  >
+                    {row.participant.avatar}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-black">{row.participant.name}</p>
+                    <p className="text-xs font-bold text-slate-500">{row.liveTeams} equipos con ruta posible</p>
+                  </div>
+                </div>
+                <strong className="text-2xl text-ink">{formatPercent(row.probability)}</strong>
+              </div>
+              <div className="h-4 overflow-hidden rounded-full bg-slate-200">
+                <div
+                  className="h-full rounded-full bg-trophy transition-all"
+                  style={{ width: `${Math.max(2, row.probability * 100)}%` }}
+                />
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {row.topTeams.map((teamRow) => (
+                  <div key={teamRow.team.id} className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-sm font-bold">
+                    <span className="min-w-0 truncate">
+                      <span className="mr-2">{teamRow.team.flag}</span>
+                      {teamRow.team.name}
+                    </span>
+                    <span className={teamRow.probability > 0 ? "text-green-700" : "text-slate-400"}>
+                      {formatPercent(teamRow.probability)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-white/10 bg-white/95 p-4 text-ink md:p-6">
+        <h3 className="text-2xl font-black">Por qué salen esos porcentajes</h3>
+        <div className="mt-3 space-y-2 text-sm font-semibold leading-6 text-slate-600">
+          <p>
+            El cálculo usa la llave actual y suma la probabilidad de campeón de todos los equipos que tiene cada dueño.
+          </p>
+          <p>
+            Los partidos finalizados cuentan como resultado fijo: el ganador avanza con 100% y el perdedor queda sin ruta al título, salvo que tenga un partido pendiente de tercer lugar.
+          </p>
+          <p>
+            En partidos pendientes ya no se usa 50/50: la app estima la probabilidad con una fuerza base tipo Elo/FIFA, la forma del Mundial capturada en los marcadores, localía ligera para anfitriones y ajustes de antecedentes entre selecciones cuando existe historial relevante.
+          </p>
+          <p>
+            No son momios oficiales. Es un modelo transparente para el fantasy: combina datos históricos, resultados actuales y la ruta de cruces que queda por jugar.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MatchCard({
   match,
   state,
@@ -995,6 +1129,154 @@ function getParticipantForPick(pickIndex: number): ParticipantId {
 
 function participantById(state: DraftState, id: ParticipantId) {
   return state.participants.find((participant) => participant.id === id) ?? PARTICIPANTS.find((participant) => participant.id === id) ?? PARTICIPANTS[0];
+}
+
+function calculateChampionProbabilities(state: DraftState) {
+  const matchesById = new Map(state.matches.map((match) => [match.id, match]));
+  const memo = new Map<string, Record<string, number>>();
+  const finalMatch = state.matches.find((match) => match.round === "Final");
+
+  function mergeDistribution(target: Record<string, number>, source: Record<string, number>, multiplier = 1) {
+    Object.entries(source).forEach(([teamId, probability]) => {
+      target[teamId] = (target[teamId] ?? 0) + probability * multiplier;
+    });
+    return target;
+  }
+
+  function entryDistribution(match: Match, slot: "A" | "B"): Record<string, number> {
+    const teamId = slot === "A" ? match.teamAId : match.teamBId;
+    if (teamId) return { [teamId]: 1 };
+
+    return state.matches
+      .filter((source) => source.nextMatchId === match.id && source.nextSlot === slot)
+      .reduce((distribution, source) => mergeDistribution(distribution, winnerDistribution(source.id)), {} as Record<string, number>);
+  }
+
+  function winnerDistribution(matchId: string): Record<string, number> {
+    const cached = memo.get(matchId);
+    if (cached) return cached;
+
+    const match = matchesById.get(matchId);
+    if (!match) return {};
+
+    if (match.status === "finished" && match.winnerTeamId) {
+      const distribution = { [match.winnerTeamId]: 1 };
+      memo.set(matchId, distribution);
+      return distribution;
+    }
+
+    const left = entryDistribution(match, "A");
+    const right = entryDistribution(match, "B");
+    const leftEntries = Object.entries(left);
+    const rightEntries = Object.entries(right);
+    const distribution: Record<string, number> = {};
+
+    if (leftEntries.length === 0 && rightEntries.length === 0) {
+      memo.set(matchId, distribution);
+      return distribution;
+    }
+    if (rightEntries.length === 0) {
+      mergeDistribution(distribution, left);
+      memo.set(matchId, distribution);
+      return distribution;
+    }
+    if (leftEntries.length === 0) {
+      mergeDistribution(distribution, right);
+      memo.set(matchId, distribution);
+      return distribution;
+    }
+
+    leftEntries.forEach(([leftTeamId, leftProbability]) => {
+      rightEntries.forEach(([rightTeamId, rightProbability]) => {
+        const matchupProbability = teamWinProbability(leftTeamId, rightTeamId, state, match);
+        const scenarioProbability = leftProbability * rightProbability;
+        distribution[leftTeamId] = (distribution[leftTeamId] ?? 0) + scenarioProbability * matchupProbability;
+        distribution[rightTeamId] = (distribution[rightTeamId] ?? 0) + scenarioProbability * (1 - matchupProbability);
+      });
+    });
+
+    memo.set(matchId, distribution);
+    return distribution;
+  }
+
+  const teamProbabilities = finalMatch ? winnerDistribution(finalMatch.id) : {};
+  const participantRows = state.participants
+    .map((participant) => {
+      const ownedTeams = state.teams.filter((team) => team.ownerId === participant.id);
+      const topTeams = ownedTeams
+        .map((team) => ({ team, probability: teamProbabilities[team.id] ?? 0 }))
+        .sort((a, b) => b.probability - a.probability || a.team.name.localeCompare(b.team.name));
+      const probability = topTeams.reduce((total, row) => total + row.probability, 0);
+
+      return {
+        participant,
+        probability,
+        liveTeams: topTeams.filter((row) => row.probability > 0).length,
+        topTeams,
+      };
+    })
+    .sort((a, b) => b.probability - a.probability);
+
+  return { teamProbabilities, participantRows };
+}
+
+function formatPercent(probability: number) {
+  if (probability > 0 && probability < 0.001) return "<0.1%";
+  return `${(probability * 100).toFixed(1)}%`;
+}
+
+function teamWinProbability(teamAId: string, teamBId: string, state: DraftState, match: Match) {
+  const scoreA =
+    teamPower(teamAId, state) +
+    headToHeadAdjustment(teamAId, teamBId) +
+    venueAdjustment(teamAId, match);
+  const scoreB =
+    teamPower(teamBId, state) +
+    headToHeadAdjustment(teamBId, teamAId) +
+    venueAdjustment(teamBId, match);
+  const probability = 1 / (1 + 10 ** ((scoreB - scoreA) / 400));
+  return Math.min(0.82, Math.max(0.18, probability));
+}
+
+function teamPower(teamId: string, state: DraftState) {
+  return (TEAM_STRENGTH[teamId] ?? 1600) + tournamentFormBonus(teamId, state);
+}
+
+function tournamentFormBonus(teamId: string, state: DraftState) {
+  const playedMatches = state.matches.filter(
+    (match) =>
+      match.status === "finished" &&
+      match.winnerTeamId &&
+      (match.teamAId === teamId || match.teamBId === teamId),
+  );
+
+  return playedMatches.reduce((bonus, match) => {
+    const isTeamA = match.teamAId === teamId;
+    const goalsFor = isTeamA ? match.scoreA : match.scoreB;
+    const goalsAgainst = isTeamA ? match.scoreB : match.scoreA;
+    const goalDifference =
+      typeof goalsFor === "number" && typeof goalsAgainst === "number" ? goalsFor - goalsAgainst : 0;
+    const resultBonus = match.winnerTeamId === teamId ? 26 : -30;
+    const marginBonus = Math.max(-18, Math.min(24, goalDifference * 8));
+    return bonus + resultBonus + marginBonus;
+  }, 0);
+}
+
+function headToHeadAdjustment(teamAId: string, teamBId: string) {
+  const direct = HEAD_TO_HEAD_BONUS[`${teamAId}|${teamBId}`];
+  if (typeof direct === "number") return direct;
+  const reverse = HEAD_TO_HEAD_BONUS[`${teamBId}|${teamAId}`];
+  if (typeof reverse === "number") return -reverse;
+  return 0;
+}
+
+function venueAdjustment(teamId: string, match: Match) {
+  const hostBonus = HOST_BONUS[teamId] ?? 0;
+  if (!hostBonus || !match.city) return 0;
+  if (teamId === "usa" && /New York|Atlanta|Dallas|Houston|Seattle|Kansas City|Los Angeles|Miami|Philadelphia|Boston|San Francisco/i.test(match.city)) return hostBonus;
+  if (teamId === "mexico" && /Ciudad de México|Monterrey|Guadalajara/i.test(match.city)) return hostBonus;
+  if (teamId === "canada" && /Toronto|Vancouver/i.test(match.city)) return hostBonus;
+  return 0;
 }
 
 function isDraftComplete(state: DraftState) {
