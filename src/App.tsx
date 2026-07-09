@@ -399,7 +399,7 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-5">
-        <nav className="mb-5 flex gap-2 overflow-x-auto rounded-lg border border-white/10 bg-white/8 p-1">
+        <nav className="mb-5 flex flex-wrap gap-2 rounded-lg border border-white/10 bg-white/8 p-1">
           {[
             ["draft", "Draft"],
             ["teams", "Mis Equipos"],

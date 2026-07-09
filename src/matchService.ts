@@ -1,3 +1,4 @@
+import { createInitialMatches } from "./data";
 import type { DraftState, Match, MatchStatus, Team } from "./types";
 
 const roundLevel: Record<string, number> = {
@@ -61,7 +62,15 @@ function inferWinnerFromScore(match: Match): Match {
 }
 
 function applyAdvancement(state: DraftState): DraftState {
-  let matches = state.matches.map((match) => ({ ...match }));
+  const baseMatchesById = new Map(createInitialMatches().map((match) => [match.id, match]));
+  let matches = state.matches.map((match) => {
+    const base = baseMatchesById.get(match.id);
+    return {
+      ...match,
+      teamAId: match.round === "16avos de final" ? match.teamAId : base?.teamAId,
+      teamBId: match.round === "16avos de final" ? match.teamBId : base?.teamBId,
+    };
+  });
   let teams = state.teams.map((team) => ({
     ...team,
     status: team.ownerId ? "alive" : "pending",

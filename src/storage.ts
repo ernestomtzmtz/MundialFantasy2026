@@ -59,8 +59,8 @@ export function normalizeState(value: unknown): DraftState {
       nextSlot: match.nextSlot,
       loserNextMatchId: match.loserNextMatchId,
       loserNextSlot: match.loserNextSlot,
-      teamAId: match.round === "16avos de final" ? match.teamAId : (saved.teamAId ?? match.teamAId),
-      teamBId: match.round === "16avos de final" ? match.teamBId : (saved.teamBId ?? match.teamBId),
+      teamAId: match.teamAId,
+      teamBId: match.teamBId,
     };
   });
 
